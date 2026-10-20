@@ -1,0 +1,16 @@
+env_content = """BOT_TOKEN=8841879295:AAHTvr2Rtp5c_Rt8g74hedyTT6EVBbKkrlk
+WEBHOOK_SECRET=9l-3Rwxq6S8m8q_pgrKs9mHSZo7Jg7lmTaul4P3KDXo
+DATABASE_URL=postgresql://neondb_owner:npg_3kTdQUO2rlJt@ep-billowing-art-b42ph414-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+AI_PROVIDER=gemini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash-lite
+MINIAPP_URL=
+CRON_SECRET=wltGAZuqwRMmNCIVgpXvzCsVsPMBXVtIZ0ILm9siNFw
+MESSAGE_CACHE_HOURS=72
+LOG_TEXT_RETENTION_DAYS=30
+"""
+
+with open('.env', 'w', encoding='utf-8') as f:
+    f.write(env_content)
+
+print('.env created successfully!')
