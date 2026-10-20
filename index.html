@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storm Manager</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); padding: 16px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .mode-selector { padding: 8px 16px; border-radius: 8px; background: var(--tg-theme-secondary-bg-color, #f0f0f0); border: none; color: var(--tg-theme-text-color, #000); cursor: pointer; }
+        .members-list { display: flex; flex-direction: column; gap: 12px; }
+        .member-card { padding: 12px; border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #f5f5f5); cursor: pointer; }
+        .member-card:hover { background: var(--tg-theme-hint-color, #e0e0e0); }
+        .member-name { font-weight: 600; margin-bottom: 4px; }
+        .member-meta { font-size: 12px; opacity: 0.7; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .modal-content { padding: 20px; border-radius: 16px; background: var(--tg-theme-bg-color, #fff); width: 90%; max-width: 320px; }
+        .modal-header { font-weight: 600; margin-bottom: 16px; }
+        .action-btn { display: block; width: 100%; padding: 12px; margin-bottom: 8px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; }
+        .btn-mute { background: var(--tg-theme-button-color, #3390ec); color: #fff; }
+        .btn-ban { background: #ff3b30; color: #fff; }
+        .btn-close { background: var(--tg-theme-secondary-bg-color, #f0f0f0); color: var(--tg-theme-text-color, #000); }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+        .status-member { background: #34c759; color: #fff; }
+        .status-muted { background: #ff9500; color: #fff; }
+        .status-banned { background: #ff3b30; color: #fff; }
+        .loading { text-align: center; padding: 20px; opacity: 0.7; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>Участники</h2>
+        <select id="modeSelector" class="mode-selector"></select>
+    </div>
+    <div id="membersList" class="members-list">
+        <div class="loading">Загрузка...</div>
+    </div>
+
+    <div id="actionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalMemberName"></div>
+            <button class="action-btn btn-mute" onclick="muteMember()">Мут (1 час)</button>
+            <button class="action-btn btn-mute" onclick="muteMemberForever()">Мут навсегда</button>
+            <button class="action-btn btn-ban" onclick="banMember()">Бан</button>
+            <button class="action-btn btn-close" onclick="closeModal()">Отмена</button>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        const API_BASE = window.location.origin;
+        let currentMember = null;
+        let availableModes = [];
+
+        tg.ready();
+        tg.expand();
+
+        async function apiCall(endpoint, options = {}) {
+            const init_data = tg.initData;
+            const chat_id = new URLSearchParams(init_data).get('chat_id') || prompt('Введите Chat ID:', '');
+            const headers = {
+                'x-telegram-init-data': init_data,
+                'x-chat-id': chat_id,
+                'Content-Type': 'application/json',
+            };
+            const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+            if (!res.ok) throw new Error(res.statusText);
+            return res.json();
+        }
+
+        async function loadMe() {
+            const data = await apiCall('/api/me');
+            availableModes = data.available_modes;
+            const selector = document.getElementById('modeSelector');
+            selector.innerHTML = '';
+            availableModes.forEach(mode => {
+                const opt = document.createElement('option');
+                opt.value = mode;
+                opt.textContent = mode === 'creator' ? 'Владелец' : mode === 'admin' ? 'Админ' : 'Участник';
+                if (mode === data.current_mode) opt.selected = true;
+                selector.appendChild(opt);
+            });
+            selector.onchange = async () => {
+                await apiCall('/api/set-mode', { method: 'POST', body: JSON.stringify({ mode: selector.value }) });
+                loadMembers();
+            };
+            return data;
+        }
+
+        async function loadMembers() {
+            const data = await apiCall('/api/members');
+            const list = document.getElementById('membersList');
+            list.innerHTML = '';
+            data.members.forEach(m => {
+                const card = document.createElement('div');
+                card.className = 'member-card';
+                const statusClass = m.status === 'banned' ? 'status-banned' : m.status === 'muted' ? 'status-muted' : 'status-member';
+                const statusText = m.status === 'banned' ? 'Забанен' : m.status === 'muted' ? 'Мут' : 'Участник';
+                card.innerHTML = `
+                    <div class="member-name">
+                        ${m.first_name || 'Аноним'} ${m.username ? '@' + m.username : ''}
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="member-meta">Сообщений: ${m.msg_count}</div>
+                `;
+                card.onclick = () => openModal(m);
+                list.appendChild(card);
+            });
+        }
+
+        function openModal(member) {
+            currentMember = member;
+            document.getElementById('modalMemberName').textContent = member.first_name || 'Аноним';
+            document.getElementById('actionModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('actionModal').classList.remove('active');
+            currentMember = null;
+        }
+
+        async function muteMember() {
+            await apiCall(`/api/members/${currentMember.user_id}/mute`, {
+                method: 'POST',
+                body: JSON.stringify({ duration_seconds: 3600 })
+            });
+            closeModal();
+            loadMembers();
+        }
+
+        async function muteMemberForever() {
+            await apiCall(`/api/members/${currentMember.user_id}/mute`, {
+                method: 'POST',
+                body: JSON.stringify({ duration_seconds: null })
+            });
+            closeModal();
+            loadMembers();
+        }
+
+        async function banMember() {
+            await apiCall(`/api/members/${currentMember.user_id}/ban`, {
+                method: 'POST',
+                body: JSON.stringify({ delete_messages: true })
+            });
+            closeModal();
+            loadMembers();
+        }
+
+        loadMe().then(() => loadMembers()).catch(e => {
+            document.getElementById('membersList').innerHTML = `<div style="padding:20px;text-align:center">Ошибка: ${e.message}</div>`;
+        });
+    </script>
+</body>
+</html>
